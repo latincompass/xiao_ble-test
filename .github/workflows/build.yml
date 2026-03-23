@@ -1,0 +1,53 @@
+name: ZMK Build for XIAO BLE
+
+# 触发条件：push/PR 到主分支，或手动触发
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+# 工作流权限配置
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+jobs:
+  build:
+    name: Build XIAO BLE ZMK Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码（包含子模块，ZMK 依赖子模块）
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # 2. 配置 ZMK 构建环境（官方推荐的容器环境）
+      - name: Setup ZMK Build Environment
+        uses: zmkfirmware/zmk-build-action@v6
+        with:
+          board: xiao_ble//zmk  # 对应你 xiao_ble.zmk.yml 中的 id
+          config: config/west.yml  # 若有自定义 west 配置可修改，默认用 ZMK 官方
+
+      # 3. 编译固件（核心构建步骤）
+      - name: Build Firmware
+        run: |
+          west build -s zmk/app -b xiao_ble/zmk -- -DZMK_CONFIG=${GITHUB_WORKSPACE}/config
+        env:
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+          ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk
+
+      # 4. 上传编译后的固件（方便下载使用）
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiao-ble-zmk-firmware
+          path: |
+            build/zephyr/zmk.uf2  # XIAO BLE 常用 UF2 格式
+            build/zephyr/zmk.bin  # 备用 BIN 格式
+            build/zephyr/zephyr.elf  # 调试用 ELF 格式
