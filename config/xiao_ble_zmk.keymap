@@ -1,34 +1,14 @@
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
-#include <dt-bindings/zmk/kscan.h>
 
 / {
-    keymap {
-        compatible = "zmk,keymap";
-        
-        default_layer {
-            bindings = <
-                &kp A &kp B &kp C
-            >;
-        };
-    };
+	keymap {
+		compatible = "zmk,keymap";
 
-    // 直连按键配置（必须！否则编译失败）
-    kscan_direct: kscan_direct {
-        compatible = "zmk,kscan-direct";
-        // 随便填 3 个引脚（不影响编译，只是让它通过）
-        row-gpios = <&gpio0 6 GPIO_ACTIVE_LOW>,
-                    <&gpio0 8 GPIO_ACTIVE_LOW>,
-                    <gpio0 10 GPIO_ACTIVE_LOW>;
-    };
-
-    // 物理布局（必须！否则编译失败）
-    physical_layouts {
-        compatible = "zmk,physical-layouts";
-        
-        layout_L0: L0 {
-            label = "L0";
-            layout = <3>;
-        };
-    };
+		default_layer {
+			bindings = <
+				&kp A &kp B &kp C
+			>;
+		};
+	};
 };
