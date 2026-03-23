@@ -1,6 +1,5 @@
 name: ZMK Build for XIAO BLE
 
-# 触发条件：push/PR 到主分支，或手动触发
 on:
   push:
     branches: [ main ]
@@ -8,46 +7,57 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# 工作流权限配置
 permissions:
   contents: read
-  packages: write
   actions: read
+  packages: read
 
 jobs:
   build:
     name: Build XIAO BLE ZMK Firmware
     runs-on: ubuntu-latest
+    # 使用 Zephyr 官方容器（内置 ZMK 所需的所有依赖）
+    container:
+      image: zmkfirmware/zmk-build-arm:latest
 
     steps:
-      # 1. 检出代码（包含子模块，ZMK 依赖子模块）
+      # 1. 检出代码（包含 ZMK 子模块）
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
+          path: workspace
 
-      # 2. 配置 ZMK 构建环境（官方推荐的容器环境）
-      - name: Setup ZMK Build Environment
-        uses: zmkfirmware/zmk-build-action@v6
-        with:
-          board: xiao_ble//zmk  # 对应你 xiao_ble.zmk.yml 中的 id
-          config: config/west.yml  # 若有自定义 west 配置可修改，默认用 ZMK 官方
-
-      # 3. 编译固件（核心构建步骤）
-      - name: Build Firmware
+      # 2. 进入工作目录并配置 West（ZMK 构建工具）
+      - name: Setup West
+        working-directory: workspace
         run: |
-          west build -s zmk/app -b xiao_ble/zmk -- -DZMK_CONFIG=${GITHUB_WORKSPACE}/config
-        env:
-          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
-          ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk
+          west init -l config/
+          west update
+          west zephyr-export
 
-      # 4. 上传编译后的固件（方便下载使用）
+      # 3. 编译固件（匹配你的板型配置：xiao_ble//zmk）
+      - name: Build Firmware
+        working-directory: workspace
+        run: |
+          west build -s app -b xiao_ble/zmk -- -DZMK_CONFIG=${GITHUB_WORKSPACE}/workspace/config
+        env:
+          # 强制生成 XIAO BLE 支持的 UF2 格式
+          ZMK_OUTPUT_FORMAT: uf2
+
+      # 4. 复制固件到宿主机器（容器内文件需导出）
+      - name: Extract Firmware
+        working-directory: workspace
+        run: |
+          mkdir -p ../firmware
+          cp build/zephyr/zmk.uf2 ../firmware/
+          cp build/zephyr/zmk.bin ../firmware/
+          cp build/zephyr/zephyr.elf ../firmware/
+
+      # 5. 上传固件产物
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
           name: xiao-ble-zmk-firmware
-          path: |
-            build/zephyr/zmk.uf2  # XIAO BLE 常用 UF2 格式
-            build/zephyr/zmk.bin  # 备用 BIN 格式
-            build/zephyr/zephyr.elf  # 调试用 ELF 格式
+          path: firmware/
