@@ -15,13 +15,19 @@ permissions:
 jobs:
   build:
     name: Build XIAO BLE ZMK Firmware
-    runs-on: ubuntu-latest
-    # 使用 Zephyr 官方容器（内置 ZMK 所需的所有依赖）
-    container:
-      image: zmkfirmware/zmk-build-arm:latest
+    runs-on: ubuntu-22.04  # 固定系统版本，避免依赖兼容问题
 
     steps:
-      # 1. 检出代码（包含 ZMK 子模块）
+      # 1. 安装系统依赖（ZMK/Zephyr 构建必需）
+      - name: Install System Dependencies
+        run: |
+          sudo apt update && sudo apt install -y \
+            git cmake ninja-build gperf \
+            ccache dfu-util device-tree-compiler \
+            wget python3 python3-pip python3-setuptools python3-wheel xz-utils file \
+            make gcc gcc-multilib g++-multilib libsdl2-dev libmagic1
+
+      # 2. 检出代码（包含 ZMK 子模块）
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
@@ -29,35 +35,64 @@ jobs:
           fetch-depth: 0
           path: workspace
 
-      # 2. 进入工作目录并配置 West（ZMK 构建工具）
-      - name: Setup West
+      # 3. 安装 Zephyr SDK（nRF52840 必需的编译工具链）
+      - name: Install Zephyr SDK
+        run: |
+          # 下载并解压 Zephyr SDK 0.16.1（适配 nRF52840 且兼容 ZMK）
+          wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.16.1/zephyr-sdk-0.16.1_linux-x86_64.tar.xz
+          wget -O - https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.16.1/sha256.sum | shasum --check --ignore-missing
+          tar xvf zephyr-sdk-0.16.1_linux-x86_64.tar.xz
+          sudo ./zephyr-sdk-0.16.1/setup.sh
+
+          # 安装 nRF 工具链补充
+          sudo apt install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+      # 4. 安装 West（ZMK 构建工具）
+      - name: Install West
+        run: |
+          pip3 install west
+          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+
+      # 5. 初始化 ZMK 构建环境
+      - name: Init ZMK Workspace
         working-directory: workspace
         run: |
+          # 初始化 West（指向你的 config 目录）
           west init -l config/
+          # 更新 ZMK 依赖子模块
           west update
+          # 导出 Zephyr 环境变量
           west zephyr-export
+          # 安装 Zephyr Python 依赖
+          pip3 install -r zephyr/scripts/requirements.txt
 
-      # 3. 编译固件（匹配你的板型配置：xiao_ble//zmk）
-      - name: Build Firmware
+      # 6. 编译 XIAO BLE 固件（核心步骤）
+      - name: Build ZMK Firmware
         working-directory: workspace
         run: |
-          west build -s app -b xiao_ble/zmk -- -DZMK_CONFIG=${GITHUB_WORKSPACE}/workspace/config
+          # 针对 xiao_ble//zmk 板型编译，强制生成 UF2 格式
+          west build -s app -b xiao_ble/zmk -- -DZMK_CONFIG=${GITHUB_WORKSPACE}/workspace/config -DZMK_OUTPUT_FORMAT=uf2
         env:
-          # 强制生成 XIAO BLE 支持的 UF2 格式
-          ZMK_OUTPUT_FORMAT: uf2
+          # 强制指定工具链，避免冲突
+          ZEPHYR_TOOLCHAIN_VARIANT: gnuarmemb
+          GNUARMEMB_TOOLCHAIN_PATH: /usr/bin
 
-      # 4. 复制固件到宿主机器（容器内文件需导出）
+      # 7. 提取固件到宿主目录
       - name: Extract Firmware
         working-directory: workspace
         run: |
           mkdir -p ../firmware
+          # 复制编译产物（UF2/BIN/ELF）
           cp build/zephyr/zmk.uf2 ../firmware/
           cp build/zephyr/zmk.bin ../firmware/
           cp build/zephyr/zephyr.elf ../firmware/
+          # 打印固件信息，方便调试
+          file ../firmware/zmk.uf2
 
-      # 5. 上传固件产物
-      - name: Upload Firmware
+      # 8. 上传固件产物
+      - name: Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
           name: xiao-ble-zmk-firmware
           path: firmware/
+          retention-days: 30  # 固件保留 30 天
